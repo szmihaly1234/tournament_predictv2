@@ -19,10 +19,10 @@ def load_artifacts():
     df = pd.read_csv('all_matches.csv')
     unique_teams = sorted(list(set(df['home_team'].unique()).union(set(df['away_team'].unique()))))
     
-    return model, le, scaler, onehot_columns, unique_teams
+    return model, le, scaler, unique_teams
 
 # Betöltjük az artefaktokat
-model, le, scaler, onehot_columns, unique_teams = load_artifacts()
+model, le, scaler, unique_teams = load_artifacts()
 
 # Create the Streamlit UI
 st.title("Football Tournament Predictor")
