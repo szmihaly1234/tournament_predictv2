@@ -51,9 +51,7 @@ if submitted:
         result_encoded = le.transform([result])[0]
 
         # Készítsük el az input adatokat a modellhez
-        input_data = np.array([[home_team_encoded, away_team_encoded, result_encoded, year, month, day]])
-
-        # Standardizálás
+        input_data = np.array([[result_encoded, year, month]])
         input_data_scaled = scaler.transform(input_data)
 
         # Biztosítsuk, hogy a neurális hálózat bemenetének mérete megfelelő legyen
