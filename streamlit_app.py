@@ -8,6 +8,7 @@ import pandas as pd
 rf_model = pickle.load(open("rf_model.pkl", "rb"))
 scaler = pickle.load(open("scaler.pkl", "rb"))
 nn_model = tf.keras.models.load_model("nn_model.h5")
+print("Neurális hálózat bemeneti alakja:", nn_model.input_shape)
 
 # A csapatok listájának beállítása (példaértékek, frissítsd a dataset alapján)
 teams = ["Brazil", "Argentina", "France", "Germany", "England", "Spain", "Italy", "Portugal"]
