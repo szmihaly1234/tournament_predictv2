@@ -36,7 +36,7 @@ with st.form("match_details"):
     match_date = st.date_input("Match Date")  # Normál dátumbeviteli mező
     year = match_date.year
     month = match_date.month
-    day = match_date.day  # Az újonnan bevezetett nap érték
+    day = match_date.day
 
     result = st.selectbox("Expected Result", ["home_win", "away_win", "draw"], index=0)
     model_choice = st.selectbox("Choose Model", ["Random Forest", "Neural Network"])
@@ -45,45 +45,26 @@ with st.form("match_details"):
 
 if submitted:
     try:
-        # Készítsünk egy DataFrame-et a megfelelő oszlopokkal
-        X = pd.DataFrame(0, index=[0])
+        # Alakítsuk át a csapatokat és az eredményt numerikus értékekké (LabelEncoder segítségével)
+        home_team_encoded = le.transform([home_team])[0] if home_team in le.classes_ else -1
+        away_team_encoded = le.transform([away_team])[0] if away_team in le.classes_ else -1
+        result_encoded = le.transform([result])[0]
 
-        # Beállítjuk a megfelelő one-hot kódolt oszlopokat
-        home_col = f"home_team_{home_team}"
-        away_col = f"away_team_{away_team}"
-        result_col = f"result_{result}"
+        # Készítsük el az input adatokat a modellhez
+        input_data = np.array([[home_team_encoded, away_team_encoded, result_encoded, year, month, day]])
 
-        if home_col in X.columns:
-            X[home_col] = 1
-        else:
-            st.warning(f"Home team '{home_team}' not in training data. Using default values.")
-        
-        if away_col in X.columns:
-            X[away_col] = 1
-        else:
-            st.warning(f"Away team '{away_team}' not in training data. Using default values.")
-        
-        if result_col in X.columns:
-            X[result_col] = 1
-
-        # Beállítjuk az egyéb numerikus jellemzőket
-        X['year'] = year
-        X['month'] = month
-        X['day'] = day  # Az új nap beállítása
-        
-        # Csak az eredeti tréning során használt oszlopokat tartjuk meg
         # Standardizálás
-        X_scaled = scaler.transform(X)
+        input_data_scaled = scaler.transform(input_data)
 
-        # Biztosítsuk, hogy a neurális hálózat input mérete megfelelő legyen
+        # Biztosítsuk, hogy a neurális hálózat bemenetének mérete megfelelő legyen
         if model_choice == "Neural Network":
-            X_scaled = np.expand_dims(X_scaled, axis=0)
+            input_data_scaled = np.expand_dims(input_data_scaled, axis=0)
 
         # Model előrejelzés
         if model_choice == "Random Forest":
-            preds = rf_model.predict_proba(X_scaled)[0]
+            preds = rf_model.predict_proba(input_data_scaled)[0]
         else:
-            preds = model.predict(X_scaled)[0]
+            preds = model.predict(input_data_scaled)[0]
 
         # Top 3 legvalószínűbb eredmény visszaalakítása
         top3_idx = np.argsort(preds)[-3:][::-1]
