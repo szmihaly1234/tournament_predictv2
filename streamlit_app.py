@@ -46,7 +46,7 @@ with st.form("match_details"):
 if submitted:
     try:
         # Készítsünk egy DataFrame-et a megfelelő oszlopokkal
-        X = pd.DataFrame(0, index=[0], columns=onehot_columns)
+        X = pd.DataFrame(0, index=[0])
 
         # Beállítjuk a megfelelő one-hot kódolt oszlopokat
         home_col = f"home_team_{home_team}"
