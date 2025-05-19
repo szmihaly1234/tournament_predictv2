@@ -23,6 +23,7 @@ def load_artifacts():
     
     return model, le, scaler, onehot_columns, unique_teams
 
+# Betöltjük az artefaktokat
 model, le, scaler, onehot_columns, unique_teams = load_artifacts()
 
 # Create the Streamlit UI
@@ -46,14 +47,14 @@ with st.form("match_details"):
 
 if submitted:
     try:
-        # Create a DataFrame with all columns from training, initialized to 0
+        # Készítsünk egy DataFrame-et a megfelelő oszlopokkal
         X = pd.DataFrame(0, index=[0], columns=onehot_columns)
-        
-        # Set the appropriate one-hot encoded columns
+
+        # Beállítjuk a megfelelő one-hot kódolt oszlopokat
         home_col = f"home_team_{home_team}"
         away_col = f"away_team_{away_team}"
         result_col = f"result_{result}"
-        
+
         if home_col in X.columns:
             X[home_col] = 1
         else:
@@ -66,43 +67,43 @@ if submitted:
         
         if result_col in X.columns:
             X[result_col] = 1
-        
-        # Set numerical features
+
+        # Beállítjuk az egyéb numerikus jellemzőket
         X['year'] = year
         X['month'] = month
-        X['day'] = day  # Új nap beállítása
+        X['day'] = day  # Az új nap beállítása
         
-        # Ensure we only keep columns that were in training
+        # Csak az eredeti tréning során használt oszlopokat tartjuk meg
         X = X[onehot_columns]
-        
-        # Scale the features
+
+        # Standardizálás
         X_scaled = scaler.transform(X)
-        
-        # Ensure neural network input shape compatibility
+
+        # Biztosítsuk, hogy a neurális hálózat input mérete megfelelő legyen
         if model_choice == "Neural Network":
-            X_scaled = np.expand_dims(X_scaled, axis=0)  # Ensures correct shape for TF model
-        
-        # Make prediction
+            X_scaled = np.expand_dims(X_scaled, axis=0)
+
+        # Model előrejelzés
         if model_choice == "Random Forest":
             preds = rf_model.predict_proba(X_scaled)[0]
         else:
             preds = model.predict(X_scaled)[0]
-        
+
+        # Top 3 legvalószínűbb eredmény visszaalakítása
         top3_idx = np.argsort(preds)[-3:][::-1]
-        
-        # Safely transform labels using the trained LabelEncoder
         valid_indices = [i for i in top3_idx if i in le.classes_]
+
         if valid_indices:
             top3_tournaments = le.inverse_transform(valid_indices)
         else:
             top3_tournaments = ["Unknown" for _ in range(len(top3_idx))]
 
         top3_probs = preds[top3_idx]
-        
-        # Display results
+
+        # Eredmények kiírása
         st.subheader("Prediction Results")
         st.write(f"Most likely tournament: **{top3_tournaments[0]}** ({(top3_probs[0]*100):.1f}%)")
-        
+
         st.write("Top 3 predicted tournaments:")
         for tourn, prob in zip(top3_tournaments, top3_probs):
             st.write(f"- {tourn}: {(prob*100):.1f}%")
@@ -111,11 +112,11 @@ if submitted:
         st.error(f"An error occurred during prediction: {str(e)}")
         st.write("Please try different input values.")
 
-# Add some info
+# Oldalsáv információ
 st.sidebar.markdown("""
 **About this app:**
 This app predicts which football tournament a match belongs to based on:
-- Home and away teams (selected from known teams)
+- Home and away teams
 - Match date (year, month, day)
 - Match result
 - Machine learning models (Random Forest or Neural Network)
