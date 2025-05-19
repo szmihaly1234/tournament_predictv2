@@ -1,117 +1,159 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import datetime
+import io  # in-memory fájlkezeléshez
 import pickle
-import tensorflow as tf
-from tensorflow import keras
+
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.ensemble import RandomForestClassifier
 
-# Load all artifacts
-@st.cache_resource
-def load_artifacts():
-    model = keras.models.load_model('nn_model.h5')
-    with open('rf_model.pkl', 'rb') as f:
-        rf_model = pickle.load(f)
-    with open('label_encoder.pkl', 'rb') as f:
-        le = pickle.load(f)
-    with open('scaler.pkl', 'rb') as f:
-        scaler = pickle.load(f)
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.optimizers import Adam
 
-    # Betöltjük a csapatlistát
-    df = pd.read_csv('all_matches.csv')
-    unique_teams = sorted(list(set(df['home_team'].unique()).union(set(df['away_team'].unique()))))
+# Alap Streamlit beállítások
+st.set_page_config(page_title="Futball mérkőzés előrejelzés", layout="wide")
+st.title("Futball mérkőzés előrejelzés")
+st.write("Az alkalmazás az `all_matches.csv` fájlból dolgozik, amely a repository-ban található.")
 
-    return model, rf_model, le, scaler, unique_teams
+# 1. Adatok betöltése a repository-ból (feltételezzük, hogy az app.py mellett van az all_matches.csv)
+@st.cache_data
+def load_data():
+    df = pd.read_csv("all_matches.csv")
+    return df
 
-# Artefaktok betöltése
-model, rf_model, le, scaler, unique_teams = load_artifacts()
+df = load_data()
 
-# Streamlit UI
-st.title("Football Tournament Predictor")
-st.write("Predict which tournament a football match belongs to based on match details")
+st.subheader("Feltöltött adatok első néhány sora")
+st.dataframe(df.head())
+st.write("Sorok száma:", df.shape[0])
+st.write("Oszlopok száma:", df.shape[1])
+st.write("Tournament-ek száma:", df['tournament'].nunique())
 
-# Input form
-with st.form("match_details"):
-    home_team = st.selectbox("Home Team", unique_teams)
-    away_team = st.selectbox("Away Team", unique_teams)
-    
-    match_date = st.date_input("Match Date")  # Normál dátumbeviteli mező
-    year = match_date.year
-    month = match_date.month
-    day = match_date.day
+# 2. Adattisztítás és feature engineering
+# Töröljük a felesleges oszlopokat, ha léteznek
+for col in ['neutral', 'country']:
+    if col in df.columns:
+        df.drop(columns=[col], inplace=True)
 
-    result = st.selectbox("Expected Result", ["home_win", "away_win", "draw"], index=0)
-    model_choice = st.selectbox("Choose Model", ["Random Forest", "Neural Network"])
-    
-    submitted = st.form_submit_button("Predict Tournament")
+# Győzelmek meghatározása: ha a hazai több gólt szerzett → hazai győzelem, kevesebb esetén idegen, egyenlőnél döntetlen
+df['home_score'] = df['home_score'].astype(int)
+df['away_score'] = df['away_score'].astype(int)
+df['results'] = np.where(df['home_score'] > df['away_score'], 'home_win',
+                         np.where(df['home_score'] < df['away_score'], 'away_win', 'draw'))
+df.drop(['home_score', 'away_score'], axis=1, inplace=True)
 
-if submitted:
-    try:
-        # Csapatok és eredmény LabelEncoding
-        if home_team in le.classes_:
-            home_team_encoded = le.transform([home_team])[0]
-        else:
-            home_team_encoded = -1  # Ismeretlen csapat kezelése
+# Dátum konvertálása és extra oszlopok (év, hónap, nap)
+df['date'] = pd.to_datetime(df['date'])
+df['year'] = df['date'].dt.year
+df['month'] = df['date'].dt.month
+df['day'] = df['date'].dt.day
 
-        if away_team in le.classes_:
-            away_team_encoded = le.transform([away_team])[0]
-        else:
-            away_team_encoded = -1  # Ismeretlen csapat kezelése
+# Ha egy tournamentnek kevesebb mint 100 meccse van, cseréljük "other"-re
+df['tournament'] = np.where(df['tournament'].map(df['tournament'].value_counts()) < 100,
+                            'other', df['tournament'])
 
-        result_encoded = le.transform([result])[0]
+# Label encoding: két külön enkóder a tournament és az eredmények számára
+tournament_le = LabelEncoder()
+results_le = LabelEncoder()
+df['tournament'] = tournament_le.fit_transform(df['tournament'])
+df['results'] = results_le.fit_transform(df['results'])
 
-        # Input előkészítése
-        input_data = np.array([[home_team_encoded, away_team_encoded, result_encoded, year, month, day]])
+# Csapatok enkódolása: egyesítsük a hazai és idegen csapatokat, hogy ugyanaz a numerikus kód kerüljön minden előfordulásnál
+teams = pd.concat([df['home_team'], df['away_team']])
+teams_unique = teams.unique()
+team_le = LabelEncoder()
+team_le.fit(teams_unique)
+df['home_team_encoded'] = team_le.transform(df['home_team'])
+df['away_team_encoded'] = team_le.transform(df['away_team'])
 
-        # Feature-k számának ellenőrzése
-        expected_features = scaler.n_features_in_
-        if input_data.shape[1] != expected_features:
-            st.error(f"Feature count mismatch! Model expected {expected_features}, but received {input_data.shape[1]}.")
-        else:
-            # Standardizálás
-            input_data_scaled = scaler.transform(input_data)
+# 3. Felhasználói beviteli adatok kiválasztása a sidebar-on
+teams_list = sorted(team_le.classes_)
+st.sidebar.header("Mérkőzés adatai")
+home_team_choice = st.sidebar.selectbox("Válaszd ki a hazai csapatot", teams_list)
+away_team_choice = st.sidebar.selectbox("Válaszd ki az idegen csapatot", teams_list)
 
-            # Neurális hálózat bemeneti méretének helyes kezelése
-            if model_choice == "Neural Network":
-                input_data_scaled = np.expand_dims(input_data_scaled, axis=0)  # (1, N)
+match_date = st.sidebar.date_input("Mérkőzés dátuma", datetime.date.today())
+year_input = match_date.year
+month_input = match_date.month
+day_input = match_date.day
 
-            # Model előrejelzés
-            if model_choice == "Random Forest":
-                preds = rf_model.predict_proba(input_data_scaled)[0]
-            else:
-                preds = model.predict(input_data_scaled)[0]
+# Mérkőzés eredménye: jelenítsük meg a lehetőségeket magyarul, majd mappeljük az angol kódokra
+result_mapping = {
+    "Hazai győzelem": "home_win",
+    "Idegen győzelem": "away_win",
+    "Döntetlen": "draw"
+}
+result_choice = st.sidebar.selectbox("Válaszd ki a mérkőzés eredményét", list(result_mapping.keys()))
+result_str = result_mapping[result_choice]
+result_encoded = int(results_le.transform([result_str])[0])
 
-            # Top 3 legvalószínűbb eredmény visszaalakítása
-            top3_idx = np.argsort(preds)[-3:][::-1]
-            valid_indices = [i for i in top3_idx if i in le.classes_]
+home_team_encoded_input = int(team_le.transform([home_team_choice])[0])
+away_team_encoded_input = int(team_le.transform([away_team_choice])[0])
 
-            if valid_indices:
-                top3_tournaments = le.inverse_transform(valid_indices)
-            else:
-                top3_tournaments = ["Unknown" for _ in range(len(top3_idx))]
+# Az alkalmazandó feature-ök: results, year, month, day, home_team_encoded, away_team_encoded
+x_new = np.array([[result_encoded, year_input, month_input, day_input,
+                     home_team_encoded_input, away_team_encoded_input]])
 
-            top3_probs = preds[top3_idx]
+# 4. Feature kiválasztás és előkészítés a modell tanításhoz
+features = ['results', 'year', 'month', 'day', 'home_team_encoded', 'away_team_encoded']
+X = df[features]
+y = df['tournament']
 
-            # Eredmények kiírása
-            st.subheader("Prediction Results")
-            st.write(f"Most likely tournament: **{top3_tournaments[0]}** ({(top3_probs[0]*100):.1f}%)")
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+x_new_scaled = scaler.transform(x_new)
 
-            st.write("Top 3 predicted tournaments:")
-            for tourn, prob in zip(top3_tournaments, top3_probs):
-                st.write(f"- {tourn}: {(prob*100):.1f}%")
-            
-    except Exception as e:
-        st.error(f"An error occurred during prediction: {str(e)}")
-        st.write("Please try different input values.")
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
 
-# Oldalsáv információ
-st.sidebar.markdown("""
-**About this app:**
-This app predicts which football tournament a match belongs to based on:
-- Home and away teams
-- Match date (year, month, day)
-- Match result
-- Machine learning models (Random Forest or Neural Network)
+# 5. Modell választás
+st.sidebar.header("Modell választása")
+model_type = st.sidebar.radio("Válaszd ki a modellt", ("Random Forest", "Neurális Háló"))
 
-The model was trained on historical international football match data.
-""")
+if st.sidebar.button("Előrejelzés és modell mentése"):
+    if model_type == "Random Forest":
+        st.write("Random Forest modell tanítása folyamatban...")
+        model_rf = RandomForestClassifier(random_state=42)
+        model_rf.fit(X_train, y_train)
+        pred = model_rf.predict(x_new_scaled)
+        predicted_tournament = tournament_le.inverse_transform(pred)[0]
+        st.success(f"A becsült tournament: **{predicted_tournament}**")
+        
+        # Mentés: a pickle-be csomagoljuk a modellt, és letöltésre ajánljuk
+        buffer = io.BytesIO()
+        pickle.dump(model_rf, buffer)
+        buffer.seek(0)
+        st.download_button(label="Random Forest modell letöltése",
+                           data=buffer,
+                           file_name="model_rf.pkl",
+                           mime="application/octet-stream")
+        
+    else:
+        st.write("Neurális háló tanítása folyamatban (kérlek várj egy kicsit)...")
+        nn_model = Sequential([
+            Dense(64, activation='relu', input_shape=(X_train.shape[1],)),
+            Dense(32, activation='relu'),
+            Dense(16, activation='relu'),
+            Dense(len(np.unique(y)), activation='softmax')
+        ])
+        nn_model.compile(optimizer=Adam(learning_rate=0.001),
+                         loss='sparse_categorical_crossentropy',
+                         metrics=['accuracy'])
+        nn_model.fit(X_train, y_train, epochs=50, batch_size=16, verbose=0)
+        pred_prob = nn_model.predict(x_new_scaled)
+        pred = [np.argmax(pred_prob, axis=1)[0]]
+        predicted_tournament = tournament_le.inverse_transform(pred)[0]
+        st.success(f"A becsült tournament: **{predicted_tournament}**")
+        
+        # H5 fájlba mentjük a neurális hálót
+        nn_model.save("model_nn.h5")
+        # Olvassuk be a fájlt byte formátumban, hogy download_button használhassa
+        with open("model_nn.h5", "rb") as f:
+            nn_bytes = f.read()
+        st.download_button(label="Neurális Háló modell letöltése",
+                           data=nn_bytes,
+                           file_name="model_nn.h5",
+                           mime="application/octet-stream")
