@@ -43,6 +43,13 @@ input_data = np.array([[results_val, year, month]])
 input_data_scaled = scaler.transform(input_data)
 print("Input shape:", input_data_scaled.shape)
 
+# LabelEncoder betöltése, ha korábban használtuk
+import pickle
+le = pickle.load(open("label_encoder.pkl", "rb"))
+
+
+
+
 if st.button("Előrejelzés"):
     if model_choice == "Random Forest":
         probs = rf_model.predict_proba(input_data_scaled)[0]
@@ -54,6 +61,8 @@ if st.button("Előrejelzés"):
     top_3_labels = [f"Tournament {i}" for i in top_3_indices]
     top_3_probs = [probs[i] for i in top_3_indices]
     
-    st.markdown("### Előrejelzések:")
-    for i in range(3):
-        st.write(f"**{top_3_labels[i]}:** {top_3_probs[i]:.2f} valószínűséggel")
+# Top 3 előrejelzés visszaalakítása
+top_3_tournaments = le.inverse_transform(top_3_indices)
+st.markdown("### Előrejelzések:")
+for i in range(3):
+    st.write(f"**{top_3_tournaments[i]}:** {top_3_probs[i]:.2f} valószínűséggel")
