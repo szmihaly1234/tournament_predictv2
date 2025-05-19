@@ -8,7 +8,7 @@ import pandas as pd
 rf_model = pickle.load(open("rf_model.pkl", "rb"))
 scaler = pickle.load(open("scaler.pkl", "rb"))
 nn_model = tf.keras.models.load_model("nn_model.h5")
-print("Neurális hálózat bemeneti alakja:", nn_model.input_shape)
+le = pickle.load(open("label_encoder.pkl", "rb"))  # LabelEncoder betöltése
 
 # A csapatok listájának beállítása (példaértékek, frissítsd a dataset alapján)
 teams = ["Brazil", "Argentina", "France", "Germany", "England", "Spain", "Italy", "Portugal"]
@@ -34,36 +34,31 @@ results_choice = st.selectbox("Eredmény", list(results_options.keys()))
 # Modell kiválasztása
 model_choice = st.selectbox("Válassz egy modellt", ["Random Forest", "Neurális Hálózat"])
 
-# Adatok előkészítése
+# Feature-ek előkészítése az eredeti hálózat bemeneti alakjához
 year = match_date.year
 month = match_date.month
 results_val = results_options[results_choice]
 
-# Adatok skálázása
-input_data = np.array([[results_val, year, month]])
-input_data_scaled = scaler.transform(input_data)
-print("Input shape:", input_data_scaled.shape)
+# Kiegészítjük az összes feature-t nullákkal, hogy az input megfeleljen az elvárt formának
+feature_names = ['results', 'year', 'month']  # Az edzés során használt összes oszlop neve
+input_data_filled = pd.DataFrame(columns=feature_names)
+input_data_filled.loc[0, ['results', 'year', 'month']] = [results_val, year, month]
+input_data_filled.fillna(0, inplace=True)  # Hiányzó oszlopokat alapértékkel töltjük ki
 
-# LabelEncoder betöltése, ha korábban használtuk
-import pickle
-le = pickle.load(open("label_encoder.pkl", "rb"))
-
-
-
+# Standardizálás
+input_data_scaled = scaler.transform(input_data_filled)
 
 if st.button("Előrejelzés"):
     if model_choice == "Random Forest":
         probs = rf_model.predict_proba(input_data_scaled)[0]
     else:
         probs = nn_model.predict(input_data_scaled)[0]
-    
-    # Top 3 legvalószínűbb eredmény
+
+    # Top 3 legvalószínűbb eredmény visszaalakítása
     top_3_indices = np.argsort(probs)[-3:][::-1]
-    top_3_labels = [f"Tournament {i}" for i in top_3_indices]
+    top_3_tournaments = le.inverse_transform(top_3_indices)
     top_3_probs = [probs[i] for i in top_3_indices]
     
-# Top 3 előrejelzés visszaalakítása
-top_3_tournaments = le.inverse_transform(top_3_indices)
-st.markdown("### Előrejelzések:")
-for i in range(3):
-    st.write(f"**{top_3_tournaments[i]}:** {top_3_probs[i]:.2f} valószínűséggel")
+    st.markdown("### Előrejelzések:")
+    for i in range(3):
+        st.write(f"**{top_3_tournaments[i]}:** {top_3_probs[i]:.2f} valószínűséggel")
