@@ -9,7 +9,7 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 # Load all artifacts
 @st.cache_resource
 def load_artifacts():
-    model = keras.models.load_model('tournament_predictor.h5')
+    model = keras.models.load_model('nn_model.h5')
     with open('label_encoder.pkl', 'rb') as f:
         le = pickle.load(f)
     with open('scaler.pkl', 'rb') as f:
