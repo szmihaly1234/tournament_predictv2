@@ -14,8 +14,6 @@ def load_artifacts():
         le = pickle.load(f)
     with open('scaler.pkl', 'rb') as f:
         scaler = pickle.load(f)
-    with open('onehot_columns.pkl', 'rb') as f:
-        onehot_columns = pickle.load(f)
     
     # Load team lists from original data
     df = pd.read_csv('all_matches.csv')
