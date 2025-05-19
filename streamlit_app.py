@@ -2,41 +2,57 @@ import streamlit as st
 import numpy as np
 import pickle
 import tensorflow as tf
+import pandas as pd
 
-# Modellek és skalázó betöltése
+# Modellek és skálázó betöltése
 rf_model = pickle.load(open("rf_model.pkl", "rb"))
 scaler = pickle.load(open("scaler.pkl", "rb"))
 nn_model = tf.keras.models.load_model("nn_model.h5")
 
+# A csapatok listájának beállítása (példaértékek, frissítsd a dataset alapján)
+teams = ["Brazil", "Argentina", "France", "Germany", "England", "Spain", "Italy", "Portugal"]
+
 st.title("Match Outcome Prediction")
 
 st.markdown("""
-Ez az alkalmazás két különböző modellt használ a mérkőzés eredményének előrejelzésére:
-- **Random Forest**
-- **Neurális Hálózat**
-
-Add meg a mérkőzés adatait az alábbiak szerint:
+Ez az alkalmazás lehetővé teszi, hogy előre jelezd a mérkőzés eredményét a Random Forest vagy a Neurális Hálózat modellekkel.
+Válaszd ki az alábbi adatokat a predikcióhoz!
 """)
 
-# Az eredmény oszlop értékeinek kiválasztása (figyelem: a LabelEncoder által képzett értékek!)
-results_val = st.selectbox("Eredmény (pl. 0 = 'draw', 1 = 'home_win', 2 = 'away_win')", [0, 1, 2])
-year_val = st.number_input("Év", value=2020, step=1)
-month_val = st.number_input("Hónap (1-12)", value=1, step=1, min_value=1, max_value=12)
+# Csapatok kiválasztása
+home_team = st.selectbox("Hazai csapat", teams)
+away_team = st.selectbox("Vendég csapat", teams)
 
-# Az input vektor elkészítése – ugyanolyan sorrendben, mint ahogy a modellek tréning során használtad
-input_data = np.array([[results_val, year_val, month_val]])
+# Dátum kiválasztása
+match_date = st.date_input("Mérkőzés dátuma")
 
-# Standardizáljuk az input adatok értékeit
+# Eredmény kiválasztása
+results_options = {"Döntetlen": 0, "Hazai győzelem": 1, "Vendég győzelem": 2}
+results_choice = st.selectbox("Eredmény", list(results_options.keys()))
+
+# Modell kiválasztása
+model_choice = st.selectbox("Válassz egy modellt", ["Random Forest", "Neurális Hálózat"])
+
+# Adatok előkészítése
+year = match_date.year
+month = match_date.month
+results_val = results_options[results_choice]
+
+# Adatok skálázása
+input_data = np.array([[results_val, year, month]])
 input_data_scaled = scaler.transform(input_data)
 
 if st.button("Előrejelzés"):
-    # Random Forest előrejelzés
-    rf_pred = rf_model.predict(input_data_scaled)
+    if model_choice == "Random Forest":
+        probs = rf_model.predict_proba(input_data_scaled)[0]
+    else:
+        probs = nn_model.predict(input_data_scaled)[0]
     
-    # Neurális hálózat előrejelzés: softmax kimenet, ezért az osztályindex az argmax
-    nn_prob = nn_model.predict(input_data_scaled)
-    nn_pred = np.argmax(nn_prob, axis=1)
+    # Top 3 legvalószínűbb eredmény
+    top_3_indices = np.argsort(probs)[-3:][::-1]
+    top_3_labels = [f"Tournament {i}" for i in top_3_indices]
+    top_3_probs = [probs[i] for i in top_3_indices]
     
     st.markdown("### Előrejelzések:")
-    st.write("**Random Forest** modell előrejelzése:", rf_pred[0])
-    st.write("**Neurális Hálózat** modell előrejelzése:", nn_pred[0])
+    for i in range(3):
+        st.write(f"**{top_3_labels[i]}:** {top_3_probs[i]:.2f} valószínűséggel")
