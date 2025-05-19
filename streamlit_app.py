@@ -1,89 +1,42 @@
 import streamlit as st
-import pandas as pd
 import numpy as np
+import pickle
 import tensorflow as tf
-from tensorflow.keras.models import load_model
-import joblib
-from datetime import datetime
 
-# Set page config
-st.set_page_config(page_title="Tournament Predictor", layout="wide")
+# Modellek és skalázó betöltése
+rf_model = pickle.load(open("rf_model.pkl", "rb"))
+scaler = pickle.load(open("scaler.pkl", "rb"))
+nn_model = tf.keras.models.load_model("nn_model.h5")
 
-# Load the saved model and preprocessing objects
-@st.cache_resource
-def load_assets():
-    model = load_model('tournament_model.h5')
-    scaler = joblib.load('scaler.save')
-    label_encoder = joblib.load('label_encoder.save')
-    return model, scaler, label_encoder
+st.title("Match Outcome Prediction")
 
-model, scaler, label_encoder = load_assets()
-
-# Create inverse mapping for tournament labels
-tournament_mapping = {i: name for i, name in enumerate(label_encoder.classes_)}
-
-# App title and description
-st.title("Football Tournament Predictor")
 st.markdown("""
-Predict the type of tournament based on match characteristics.
+Ez az alkalmazás két különböző modellt használ a mérkőzés eredményének előrejelzésére:
+- **Random Forest**
+- **Neurális Hálózat**
+
+Add meg a mérkőzés adatait az alábbiak szerint:
 """)
 
-# Sidebar for input features
-st.sidebar.header("Input Match Parameters")
+# Az eredmény oszlop értékeinek kiválasztása (figyelem: a LabelEncoder által képzett értékek!)
+results_val = st.selectbox("Eredmény (pl. 0 = 'draw', 1 = 'home_win', 2 = 'away_win')", [0, 1, 2])
+year_val = st.number_input("Év", value=2020, step=1)
+month_val = st.number_input("Hónap (1-12)", value=1, step=1, min_value=1, max_value=12)
 
-# Create input widgets
-with st.sidebar.form("input_form"):
-    result = st.selectbox("Match Result", ["home_win", "away_win", "draw"])
-    year = st.number_input("Year", min_value=1970, max_value=datetime.now().year, value=2023)
-    month = st.selectbox("Month", range(1, 13), format_func=lambda x: datetime(1900, x, 1).strftime('%B'))
-    
-    submitted = st.form_submit_button("Predict Tournament")
+# Az input vektor elkészítése – ugyanolyan sorrendben, mint ahogy a modellek tréning során használtad
+input_data = np.array([[results_val, year_val, month_val]])
 
-# Main content area
-if submitted:
-    # Prepare input data
-    input_data = pd.DataFrame({
-        'results': [result],
-        'year': [year],
-        'month': [month]
-    })
-    
-    # Encode and scale the input
-    input_data['results'] = label_encoder.transform(input_data['results'])
-    input_scaled = scaler.transform(input_data)
-    
-    # Make prediction
-    prediction = model.predict(input_scaled)
-    predicted_class = np.argmax(prediction, axis=1)
-    predicted_tournament = tournament_mapping[predicted_class[0]]
-    confidence = np.max(prediction) * 100
-    
-    # Display results
-    st.subheader("Prediction Results")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.metric("Predicted Tournament", predicted_tournament)
-        st.metric("Confidence", f"{confidence:.1f}%")
-    
-    with col2:
-        st.write("**Probability Distribution:**")
-        prob_df = pd.DataFrame({
-            'Tournament': [tournament_mapping[i] for i in range(len(prediction[0]))],
-            'Probability': prediction[0]
-        }).sort_values('Probability', ascending=False)
-        
-        st.dataframe(prob_df.style.format({'Probability': '{:.2%}'}), hide_index=True)
-    
-    # Visualize probabilities
-    st.bar_chart(prob_df.set_index('Tournament'))
+# Standardizáljuk az input adatok értékeit
+input_data_scaled = scaler.transform(input_data)
 
-# Add some explanations
-st.markdown("""
-### How It Works
-1. Select the match result, year, and month
-2. Click the "Predict Tournament" button
-3. View the predicted tournament type and confidence level
-
-The model was trained on historical match data to predict the type of tournament based on these simple features.
-""")
+if st.button("Előrejelzés"):
+    # Random Forest előrejelzés
+    rf_pred = rf_model.predict(input_data_scaled)
+    
+    # Neurális hálózat előrejelzés: softmax kimenet, ezért az osztályindex az argmax
+    nn_prob = nn_model.predict(input_data_scaled)
+    nn_pred = np.argmax(nn_prob, axis=1)
+    
+    st.markdown("### Előrejelzések:")
+    st.write("**Random Forest** modell előrejelzése:", rf_pred[0])
+    st.write("**Neurális Hálózat** modell előrejelzése:", nn_pred[0])
