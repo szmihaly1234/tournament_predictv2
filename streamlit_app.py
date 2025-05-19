@@ -1,78 +1,124 @@
 import streamlit as st
+import pandas as pd
 import numpy as np
 import pickle
 import tensorflow as tf
-import pandas as pd
+from tensorflow import keras
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 
-# Modellek és skálázó betöltése
-rf_model = pickle.load(open("rf_model.pkl", "rb"))
-scaler = pickle.load(open("scaler.pkl", "rb"))
-nn_model = tf.keras.models.load_model("nn_model.h5")
-le = pickle.load(open("label_encoder.pkl", "rb"))  # LabelEncoder betöltése
+# Load all artifacts
+@st.cache_resource
+def load_artifacts():
+    model = keras.models.load_model('tournament_predictor.h5')
+    with open('label_encoder.pkl', 'rb') as f:
+        le = pickle.load(f)
+    with open('scaler.pkl', 'rb') as f:
+        scaler = pickle.load(f)
+    with open('onehot_columns.pkl', 'rb') as f:
+        onehot_columns = pickle.load(f)
+    
+    # Load team lists from original data
+    df = pd.read_csv('all_matches.csv')
+    unique_teams = sorted(list(set(df['home_team'].unique()).union(set(df['away_team'].unique()))))
+    
+    return model, le, scaler, onehot_columns, unique_teams
 
-# A csapatok listájának beállítása (frissítsd a dataset alapján)
-teams = ["Brazil", "Argentina", "France", "Germany", "England", "Spain", "Italy", "Portugal"]
+model, le, scaler, onehot_columns, unique_teams = load_artifacts()
 
-st.title("Match Outcome Prediction")
+# Create the Streamlit UI
+st.title("Football Tournament Predictor")
+st.write("Predict which tournament a football match belongs to based on match details")
 
-st.markdown("""
-Ez az alkalmazás lehetővé teszi, hogy előre jelezd a mérkőzés eredményét a Random Forest vagy a Neurális Hálózat modellekkel.
-Válaszd ki az alábbi adatokat a predikcióhoz!
+# Input form
+with st.form("match_details"):
+    home_team = st.selectbox("Home Team", unique_teams)
+    away_team = st.selectbox("Away Team", unique_teams)
+    
+    match_date = st.date_input("Match Date")  # Normál dátumbeviteli mező
+    year = match_date.year
+    month = match_date.month
+    day = match_date.day  # Az újonnan bevezetett nap érték
+
+    result = st.selectbox("Expected Result", ["home_win", "away_win", "draw"], index=0)
+    model_choice = st.selectbox("Choose Model", ["Random Forest", "Neural Network"])
+    
+    submitted = st.form_submit_button("Predict Tournament")
+
+if submitted:
+    try:
+        # Create a DataFrame with all columns from training, initialized to 0
+        X = pd.DataFrame(0, index=[0], columns=onehot_columns)
+        
+        # Set the appropriate one-hot encoded columns
+        home_col = f"home_team_{home_team}"
+        away_col = f"away_team_{away_team}"
+        result_col = f"result_{result}"
+        
+        if home_col in X.columns:
+            X[home_col] = 1
+        else:
+            st.warning(f"Home team '{home_team}' not in training data. Using default values.")
+        
+        if away_col in X.columns:
+            X[away_col] = 1
+        else:
+            st.warning(f"Away team '{away_team}' not in training data. Using default values.")
+        
+        if result_col in X.columns:
+            X[result_col] = 1
+        
+        # Set numerical features
+        X['year'] = year
+        X['month'] = month
+        X['day'] = day  # Új nap beállítása
+        
+        # Ensure we only keep columns that were in training
+        X = X[onehot_columns]
+        
+        # Scale the features
+        X_scaled = scaler.transform(X)
+        
+        # Ensure neural network input shape compatibility
+        if model_choice == "Neural Network":
+            X_scaled = np.expand_dims(X_scaled, axis=0)  # Ensures correct shape for TF model
+        
+        # Make prediction
+        if model_choice == "Random Forest":
+            preds = rf_model.predict_proba(X_scaled)[0]
+        else:
+            preds = model.predict(X_scaled)[0]
+        
+        top3_idx = np.argsort(preds)[-3:][::-1]
+        
+        # Safely transform labels using the trained LabelEncoder
+        valid_indices = [i for i in top3_idx if i in le.classes_]
+        if valid_indices:
+            top3_tournaments = le.inverse_transform(valid_indices)
+        else:
+            top3_tournaments = ["Unknown" for _ in range(len(top3_idx))]
+
+        top3_probs = preds[top3_idx]
+        
+        # Display results
+        st.subheader("Prediction Results")
+        st.write(f"Most likely tournament: **{top3_tournaments[0]}** ({(top3_probs[0]*100):.1f}%)")
+        
+        st.write("Top 3 predicted tournaments:")
+        for tourn, prob in zip(top3_tournaments, top3_probs):
+            st.write(f"- {tourn}: {(prob*100):.1f}%")
+            
+    except Exception as e:
+        st.error(f"An error occurred during prediction: {str(e)}")
+        st.write("Please try different input values.")
+
+# Add some info
+st.sidebar.markdown("""
+**About this app:**
+This app predicts which football tournament a match belongs to based on:
+- Home and away teams (selected from known teams)
+- Match date (year, month, day)
+- Match result
+- Machine learning models (Random Forest or Neural Network)
+
+The model was trained on historical international football match data.
 """)
-
-# Csapatok kiválasztása
-home_team = st.selectbox("Hazai csapat", teams)
-away_team = st.selectbox("Vendég csapat", teams)
-
-# Dátum kiválasztása
-match_date = st.date_input("Mérkőzés dátuma")
-
-# Eredmény kiválasztása
-results_options = {"Döntetlen": 0, "Hazai győzelem": 1, "Vendég győzelem": 2}
-results_choice = st.selectbox("Eredmény", list(results_options.keys()))
-
-# Modell kiválasztása
-model_choice = st.selectbox("Válassz egy modellt", ["Random Forest", "Neurális Hálózat"])
-
-# Feature-ek előkészítése az eredeti hálózat bemeneti alakjához
-year = match_date.year
-month = match_date.month
-results_val = results_options[results_choice]
-
-# Az eredeti feature oszlopok listáját előzetesen be kell állítani
-feature_names = [...]  # Az edzés során használt összes oszlop neve
-
-# Készítsünk egy DataFrame-et a megfelelő oszlopokkal
-input_data_filled = pd.DataFrame(columns=feature_names)
-input_data_filled.loc[0, ['results', 'year', 'month']] = [results_val, year, month]
-
-# Hiányzó oszlopokat 0-ra állítjuk
-input_data_filled.fillna(0, inplace=True)
-
-# Standardizálás
-input_data_scaled = scaler.transform(input_data_filled)
-
-# Biztosítsuk, hogy az alak megfeleljen a hálózat elvárásainak
-input_data_scaled = np.expand_dims(input_data_scaled, axis=0)  # (1, 565)
-
-if st.button("Előrejelzés"):
-    if model_choice == "Random Forest":
-        probs = rf_model.predict_proba(input_data_scaled)[0]
-    else:
-        probs = nn_model.predict(input_data_scaled)[0]
-
-    # Top 3 legvalószínűbb eredmény visszaalakítása
-    top_3_indices = np.argsort(probs)[-3:][::-1]
-
-    # Ellenőrizzük, hogy az előrejelzési eredmények szerepelnek-e az eredeti osztályok között
-    valid_indices = [i for i in top_3_indices if i in le.classes_]
-    if valid_indices:
-        top_3_tournaments = le.inverse_transform(valid_indices)
-    else:
-        top_3_tournaments = ["Ismeretlen" for _ in range(len(top_3_indices))]
-
-    top_3_probs = [probs[i] for i in top_3_indices]
-
-    st.markdown("### Előrejelzések:")
-    for i in range(3):
-        st.write(f"**{top_3_tournaments[i]}:** {top_3_probs[i]:.2f} valószínűséggel")
