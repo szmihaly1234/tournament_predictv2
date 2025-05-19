@@ -41,6 +41,7 @@ results_val = results_options[results_choice]
 # Adatok skálázása
 input_data = np.array([[results_val, year, month]])
 input_data_scaled = scaler.transform(input_data)
+print("Input shape:", input_data_scaled.shape)
 
 if st.button("Előrejelzés"):
     if model_choice == "Random Forest":
