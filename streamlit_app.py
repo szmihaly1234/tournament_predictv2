@@ -12,7 +12,7 @@ st.set_page_config(page_title="Tournament Predictor", layout="wide")
 # Load the saved model and preprocessing objects
 @st.cache_resource
 def load_assets():
-    model = load_model('tournament_model.keras')
+    model = load_model('tournament_model.h5')
     scaler = joblib.load('scaler.save')
     label_encoder = joblib.load('label_encoder.save')
     return model, scaler, label_encoder
