@@ -14,15 +14,17 @@ def load_artifacts():
         le = pickle.load(f)
     with open('scaler.pkl', 'rb') as f:
         scaler = pickle.load(f)
+    with open('onehot_columns.pkl', 'rb') as f:
+        onehot_columns = pickle.load(f)
     
     # Load team lists from original data
     df = pd.read_csv('all_matches.csv')
     unique_teams = sorted(list(set(df['home_team'].unique()).union(set(df['away_team'].unique()))))
     
-    return model, le, scaler, unique_teams
+    return model, le, scaler, onehot_columns, unique_teams
 
 # Betöltjük az artefaktokat
-model, le, scaler, unique_teams = load_artifacts()
+model, le, scaler, onehot_columns, unique_teams = load_artifacts()
 
 # Create the Streamlit UI
 st.title("Football Tournament Predictor")
